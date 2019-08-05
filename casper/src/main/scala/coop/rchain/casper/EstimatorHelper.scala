@@ -103,6 +103,7 @@ object EstimatorHelper {
                          blockAncestorMeta => BlockStore[F].get(blockAncestorMeta.blockHash)
                        )
       ancestors = maybeAncestors.flatten
+      // TODO: convert directly to TuplespaceEvents instead of going via toRspaceEvent
       ancestorEvents = (ancestors.flatMap(_.getBody.deploys.flatMap(_.deployLog)) ++
         ancestors.flatMap(_.getBody.deploys.flatMap(_.paymentLog)))
         .map(EventConverter.toRspaceEvent)
@@ -132,7 +133,7 @@ object EstimatorHelper {
     (for {
       b1  <- b1Events
       b2  <- b2Events
-      res = conflicts(b1, b2)
+      res = b1.conflicts(b2)
       // TODO: fail fast
     } yield (res)).contains(true)
 
@@ -156,12 +157,22 @@ object EstimatorHelper {
         val produceEvents = produces
           .groupBy(_.channelsHash)
           .mapValues[Set[TuplespaceEvent]](
-            ops => ops.map(p => NoMatch(if (p.persistent) NonLinearProduce else LinearProduce))
+            ops =>
+              ops.map(
+                p =>
+                  NoMatch(
+                    if (p.persistent) NonLinearProduce(p.hash)
+                    else LinearProduce(p.hash)
+                  )
+              )
           )
         val consumeEvents = consumes
           .collect {
-            case Consume(singleChannelHash :: Nil, _, persistent, _) =>
-              singleChannelHash -> NoMatch(if (persistent) NonLinearConsume else LinearConsume)
+            case Consume(singleChannelHash :: Nil, hash, persistent, _) =>
+              singleChannelHash -> NoMatch(
+                if (persistent) NonLinearConsume(hash)
+                else LinearConsume(hash)
+              )
           }
           .groupBy(_._1)
           .mapValues[Set[TuplespaceEvent]](_.map(_._2))
@@ -170,9 +181,11 @@ object EstimatorHelper {
           .collect {
             case COMM(consume, produce :: Nil, _) => {
               val cop =
-                if (consume.persistent) NonLinearConsume else LinearConsume
+                if (consume.persistent) NonLinearConsume(consume.hash)
+                else LinearConsume(consume.hash)
               val pop =
-                if (produce.persistent) NonLinearProduce else LinearProduce
+                if (produce.persistent) NonLinearProduce(produce.hash)
+                else LinearProduce(produce.hash)
               produce.channelsHash -> Match(
                 cop,
                 pop,
@@ -187,27 +200,15 @@ object EstimatorHelper {
         produceEvents.combine(consumeEvents).combine(commEvents)
     }
 
-  // TODO: move to eventOps
-  private[this] def conflicts(op1: TuplespaceEvent, op2: TuplespaceEvent): Boolean =
-    true /*op1 match {
-    case NoMatch(_:ProduceOperation) =>
-      op2 match {
-        // !X !X
-        case NoMatch(_:ProduceOperation) => false
-        // !X 4X
-        case NoMatch(_:ConsumeOperation) => true
-        case _ => true
-      }
-    case _ => true
-  }*/
-
-  sealed trait TuplespaceOperation extends Product with Serializable
-  sealed trait ProduceOperation    extends TuplespaceOperation
-  sealed trait ConsumeOperation    extends TuplespaceOperation
-  case object LinearProduce        extends ProduceOperation
-  case object NonLinearProduce     extends ProduceOperation
-  case object LinearConsume        extends ConsumeOperation
-  case object NonLinearConsume     extends ConsumeOperation
+  sealed trait TuplespaceOperation extends Product with Serializable {
+    def hash: Blake2b256Hash
+  }
+  sealed trait ProduceOperation                           extends TuplespaceOperation
+  sealed trait ConsumeOperation                           extends TuplespaceOperation
+  final case class LinearProduce(hash: Blake2b256Hash)    extends ProduceOperation
+  final case class NonLinearProduce(hash: Blake2b256Hash) extends ProduceOperation
+  final case class LinearConsume(hash: Blake2b256Hash)    extends ConsumeOperation
+  final case class NonLinearConsume(hash: Blake2b256Hash) extends ConsumeOperation
 
   sealed trait TuplespaceEvent
   final case class Match(
@@ -217,4 +218,60 @@ object EstimatorHelper {
   ) extends TuplespaceEvent
   final case class NoMatch(op: TuplespaceOperation) extends TuplespaceEvent
 
+  // define ordering of events to reduce duplication in the pattern match
+  // e.g. no match always comes before a match, produce before consume etc.
+  // TODO: use scoring to avoid pattern matching hell
+  implicit private[this] val tuplespaceEventOrdering = new Ordering[TuplespaceEvent] {
+    def compare(l: TuplespaceEvent, r: TuplespaceEvent) = l match {
+      case NoMatch(NonLinearProduce(_) | NonLinearConsume(_)) =>
+        r match {
+          case NoMatch(LinearProduce(_) | LinearConsume(_)) => 1
+          case NoMatch(_)                                   => 0
+          case Match(_, _, _)                               => -1
+        }
+      case NoMatch(LinearProduce(_) | LinearConsume(_)) =>
+        r match {
+          case NoMatch(NonLinearProduce(_) | NonLinearConsume(_)) => -1
+          case NoMatch(_)                                         => 0
+          case Match(_, _, _)                                     => -1
+        }
+      case Match(_, _, _) =>
+        r match {
+          case NoMatch(_)     => 1
+          case Match(_, _, _) => 0
+        }
+    }
+  }
+
+  private[this] val Conflicts = true
+  private[this] val Merges    = false
+
+  implicit class TuplespaceEventOps(val ev: TuplespaceEvent) extends AnyVal {
+
+    private[casper] def conflicts(other: TuplespaceEvent): Boolean = {
+      // order ev and other
+      val e1 = Ordering[TuplespaceEvent].min(ev, other)
+      val e2 = if (ev == e1) other else ev
+      e1 match {
+        case NoMatch(_: LinearProduce) => // !X
+          e2 match {
+            case NoMatch(_: LinearProduce)                                      => Merges // !X
+            case NoMatch(_: ConsumeOperation)                                   => Conflicts // 4X
+            case Match(LinearConsume(_), LinearProduce(_), _ @LinearProduce(_)) => Merges // !4
+            case Match(LinearConsume(_), LinearProduce(_), _ @LinearConsume(_)) => Merges // 4!
+            case _                                                              => Conflicts
+          }
+
+        case NoMatch(_: LinearConsume) => // 4X
+          e2 match {
+            case NoMatch(_: LinearProduce)                                      => Conflicts // !X
+            case NoMatch(_: ConsumeOperation)                                   => Merges // 4X
+            case Match(LinearConsume(_), LinearProduce(_), _ @LinearProduce(_)) => Merges // !4
+            case Match(LinearConsume(_), LinearProduce(_), _ @LinearConsume(_)) => Merges // 4!
+            case _                                                              => Conflicts
+          }
+        case _ => Conflicts
+      }
+    }
+  }
 }

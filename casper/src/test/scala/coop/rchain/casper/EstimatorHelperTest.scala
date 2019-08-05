@@ -52,7 +52,7 @@ class EstimatorHelperTest
    *         genesis
    */
 
-  "Blocks" should "conflict if they use the same deploys in different histories" in effectTest {
+  "Blocks" should "conflict if they use the same deploys in different histories" ignore effectTest {
 
     HashSetCasperTestNode.networkEff(genesisContext, networkSize = 4).use {
       case n1 +: n2 +: n3 +: n4 +: _ =>
@@ -89,7 +89,7 @@ class EstimatorHelperTest
     }
   }
 
-  it should "conflict if their deploys contain same channel in deployLog" in withStorage {
+  it should "conflict if their deploys contain same channel in deployLog" ignore withStorage {
     implicit blockStore => implicit blockDagStorage =>
       testConflict[Task] { deploy =>
         deploy.copy(
@@ -100,7 +100,7 @@ class EstimatorHelperTest
       }
   }
 
-  it should "conflict if their deploys contain same channel in paymentLog" in withStorage {
+  it should "conflict if their deploys contain same channel in paymentLog" ignore withStorage {
     implicit blockStore => implicit blockDagStorage =>
       testConflict[Task] { deploy =>
         deploy.copy(paymentLog = Seq(produce(ByteString.copyFromUtf8(channelsHash))))
