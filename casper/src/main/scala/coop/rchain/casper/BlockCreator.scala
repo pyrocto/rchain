@@ -54,8 +54,11 @@ object BlockCreator {
         tipHashes             <- Estimator.tips[F](dag, genesis)
         _                     <- spanF.mark("after-estimator")
         parents               <- EstimatorHelper.chooseNonConflicting[F](tipHashes, dag)
+        _                     <- spanF.mark("after-1")
         maxBlockNumber        = ProtoUtil.maxBlockNumber(parents)
+        _                     <- spanF.mark("after-2")
         invalidLatestMessages <- ProtoUtil.invalidLatestMessages[F](dag)
+        _                     <- spanF.mark("after-3")
         slashingDeploys <- invalidLatestMessages.values.toList.traverse { invalidBlockHash =>
                             val encodedInvalidBlockHash =
                               Base16.encode(invalidBlockHash.toByteArray)
@@ -73,14 +76,20 @@ object BlockCreator {
                               sec = privateKey
                             )
                           }
+        _ <- spanF.mark("after-4")
         _ <- Cell[F, CasperState].modify { s =>
               s.copy(deployHistory = s.deployHistory ++ slashingDeploys)
             }
+        _                <- spanF.mark("after-5")
         _                <- updateDeployHistory[F](state, maxBlockNumber)
+        _                <- spanF.mark("after-6")
         deploys          <- extractDeploys[F](dag, parents, maxBlockNumber, expirationThreshold)
+        _                <- spanF.mark("after-7")
         justifications   <- computeJustifications[F](dag, parents)
         now              <- Time[F].currentMillis
+        _                <- spanF.mark("after-8")
         invalidBlocksSet <- dag.invalidBlocks
+        _                <- spanF.mark("after-9")
         invalidBlocks    = invalidBlocksSet.map(block => (block.blockHash, block.sender)).toMap
         unsignedBlock <- if (deploys.nonEmpty || parents.length > 1) {
                           processDeploysAndCreateBlock[F](
@@ -132,7 +141,7 @@ object BlockCreator {
   }
 
   // TODO: Remove no longer valid deploys here instead of with lastFinalizedBlock call
-  private def extractDeploys[F[_]: Monad: Log: Time: BlockStore](
+  private def extractDeploys[F[_]: Monad: Log: Time: BlockStore: Span](
       dag: BlockDagRepresentation[F],
       parents: Seq[BlockMessage],
       maxBlockNumber: Long,

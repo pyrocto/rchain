@@ -6,6 +6,7 @@ import cats.data.OptionT
 import cats.effect.Sync
 import cats.implicits._
 import cats.{Applicative, Monad}
+
 import com.google.protobuf.{ByteString, Int32Value, StringValue}
 import coop.rchain.blockstorage.{BlockDagRepresentation, BlockStore}
 import coop.rchain.casper._
@@ -19,9 +20,10 @@ import coop.rchain.models.BlockHash.BlockHash
 import coop.rchain.models.Validator.Validator
 import coop.rchain.models._
 import coop.rchain.rholang.interpreter.DeployParameters
-
 import scala.collection.immutable
 import scala.collection.immutable.Map
+
+import coop.rchain.metrics.Span
 
 object ProtoUtil {
 
@@ -205,12 +207,21 @@ object ProtoUtil {
       ProtoUtil.unsafeGetBlock[F](parentHash)
     }
 
-  def unsafeGetParentsAboveBlockNumber[F[_]: Monad: BlockStore](
+  def unsafeGetParentsSpan[F[_]: Monad: BlockStore: Span](b: BlockMessage): F[List[BlockMessage]] =
+    ProtoUtil.parentHashes(b).toList.traverse { parentHash =>
+      for {
+        _     <- Span[F].mark("before-unsafe-get-block")
+        block <- ProtoUtil.unsafeGetBlock[F](parentHash)
+        _     <- Span[F].mark("after-unsafe-get-block")
+      } yield block
+    }
+
+  def unsafeGetParentsAboveBlockNumber[F[_]: Monad: BlockStore: Span](
       b: BlockMessage,
       blockNumber: Long
   ): F[List[BlockMessage]] =
     ProtoUtil
-      .unsafeGetParents[F](b)
+      .unsafeGetParentsSpan[F](b)
       .map(parents => parents.filter(p => ProtoUtil.blockNumber(p) >= blockNumber))
 
   def containsDeploy(b: BlockMessage, user: ByteString, timestamp: Long): Boolean =
