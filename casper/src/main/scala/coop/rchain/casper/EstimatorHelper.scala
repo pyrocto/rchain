@@ -171,43 +171,44 @@ object EstimatorHelper {
           .mapValues[Set[TuplespaceEvent]](_.map(_._2))
     }
 
-  sealed trait TuplespaceOperation extends Product with Serializable {
-    def hash: Blake2b256Hash
-  }
-  sealed trait ProduceOperation                           extends TuplespaceOperation
-  sealed trait ConsumeOperation                           extends TuplespaceOperation
-  final case class LinearProduce(hash: Blake2b256Hash)    extends ProduceOperation
-  final case class NonLinearProduce(hash: Blake2b256Hash) extends ProduceOperation
-  final case class LinearConsume(hash: Blake2b256Hash)    extends ConsumeOperation
-  final case class NonLinearConsume(hash: Blake2b256Hash) extends ConsumeOperation
+  final case class TuplespaceEvent(
+      incoming: TuplespaceOperation,
+      matched: Option[TuplespaceOperation]
+  )
+  final case class TuplespaceOperation(
+      polarity: Polarity,
+      cardinality: Cardinality,
+      eventHash: Blake2b256Hash
+  )
 
-  sealed trait TuplespaceEvent
-  final case class Match(
-      consume: ConsumeOperation,
-      produce: ProduceOperation,
-      incomingEvent: TuplespaceOperation
-  ) extends TuplespaceEvent
-  final case class NoMatch(op: TuplespaceOperation) extends TuplespaceEvent
+  trait Polarity
+  case object Send    extends Polarity
+  case object Receive extends Polarity
+
+  trait Cardinality
+  case object Linear    extends Cardinality
+  case object NonLinear extends Cardinality
 
   object TuplespaceEvent {
 
-    implicit private[this] def liftProduce(produce: Produce): ProduceOperation =
-      if (produce.persistent) NonLinearProduce(produce.hash)
-      else LinearProduce(produce.hash)
+    implicit private[this] def liftProduce(produce: Produce): TuplespaceOperation =
+      TuplespaceOperation(Send, if (produce.persistent) NonLinear else Linear, produce.hash)
 
-    implicit private[this] def liftConsume(consume: Consume): ConsumeOperation =
-      if (consume.persistent) NonLinearConsume(consume.hash)
-      else LinearConsume(consume.hash)
+    implicit private[this] def liftConsume(consume: Consume): TuplespaceOperation =
+      TuplespaceOperation(Receive, if (consume.persistent) NonLinear else Linear, consume.hash)
 
-    def from(produce: Produce): (Blake2b256Hash, TuplespaceEvent) = produce.channelsHash -> NoMatch(
-      produce
-    )
+    def from(produce: Produce): (Blake2b256Hash, TuplespaceEvent) =
+      produce.channelsHash -> TuplespaceEvent(
+        produce,
+        None
+      )
 
     def from(consume: Consume): Option[(Blake2b256Hash, TuplespaceEvent)] = consume match {
       case Consume(singleChannelHash :: Nil, _, _, _) =>
         Some(
-          singleChannelHash -> NoMatch(
-            consume
+          singleChannelHash -> TuplespaceEvent(
+            consume,
+            None
           )
         )
       case _ => None
@@ -216,12 +217,12 @@ object EstimatorHelper {
     def from(comm: COMM, produces: Set[Produce]): Option[(Blake2b256Hash, TuplespaceEvent)] =
       comm match {
         case COMM(consume, produce :: Nil, _) => {
+          val incoming: TuplespaceOperation =
+            if (produces.contains(produce)) consume else produce
           Some(
-            produce.channelsHash -> Match(
-              consume,
-              produce,
-              if (produces.contains(produce)) consume
-              else produce
+            produce.channelsHash -> TuplespaceEvent(
+              incoming,
+              Some(if (incoming == liftProduce(produce)) consume else produce)
             )
           )
         }
@@ -229,60 +230,18 @@ object EstimatorHelper {
       }
   }
 
-  // define ordering of events to reduce duplication in the pattern match
-  // e.g. no match always comes before a match, produce before consume etc.
-  // TODO: use scoring to avoid pattern matching hell
-  implicit private[this] val tuplespaceEventOrdering = new Ordering[TuplespaceEvent] {
-    def compare(l: TuplespaceEvent, r: TuplespaceEvent) = l match {
-      case NoMatch(NonLinearProduce(_) | NonLinearConsume(_)) =>
-        r match {
-          case NoMatch(LinearProduce(_) | LinearConsume(_)) => 1
-          case NoMatch(_)                                   => 0
-          case Match(_, _, _)                               => -1
-        }
-      case NoMatch(LinearProduce(_) | LinearConsume(_)) =>
-        r match {
-          case NoMatch(NonLinearProduce(_) | NonLinearConsume(_)) => -1
-          case NoMatch(_)                                         => 0
-          case Match(_, _, _)                                     => -1
-        }
-      case Match(_, _, _) =>
-        r match {
-          case NoMatch(_)     => 1
-          case Match(_, _, _) => 0
-        }
-    }
-  }
-
-  private[this] val Conflicts = true
-  private[this] val Merges    = false
-
   implicit class TuplespaceEventOps(val ev: TuplespaceEvent) extends AnyVal {
 
-    private[casper] def conflicts(other: TuplespaceEvent): Boolean = {
-      // order ev and other
-      val e1 = Ordering[TuplespaceEvent].min(ev, other)
-      val e2 = if (ev == e1) other else ev
-      e1 match {
-        case NoMatch(_: LinearProduce) => // !X
-          e2 match {
-            case NoMatch(_: LinearProduce)                                      => Merges // !X
-            case NoMatch(_: ConsumeOperation)                                   => Conflicts // 4X
-            case Match(LinearConsume(_), LinearProduce(_), _ @LinearProduce(_)) => Merges // !4
-            case Match(LinearConsume(_), LinearProduce(_), _ @LinearConsume(_)) => Merges // 4!
-            case _                                                              => Conflicts
-          }
+    private[casper] def conflicts(other: TuplespaceEvent): Boolean =
+      if (ev.incoming.polarity == other.incoming.polarity)
+        ev.matched == other.matched.filter(_.cardinality == Linear)
+      else
+        !(
+          ev.incoming.cardinality == Linear && other.incoming.cardinality == Linear && (ev.matched != None || other.matched != None) ||
 
-        case NoMatch(_: LinearConsume) => // 4X
-          e2 match {
-            case NoMatch(_: LinearProduce)                                      => Conflicts // !X
-            case NoMatch(_: ConsumeOperation)                                   => Merges // 4X
-            case Match(LinearConsume(_), LinearProduce(_), _ @LinearProduce(_)) => Merges // !4
-            case Match(LinearConsume(_), LinearProduce(_), _ @LinearConsume(_)) => Merges // 4!
-            case _                                                              => Conflicts
-          }
-        case _ => Conflicts
-      }
-    }
+            ev.incoming.cardinality == NonLinear && other.matched != None ||
+            other.incoming.cardinality == NonLinear && ev.matched != None
+        ) //patrz opis case'u HAD_ITS_MATCH, INCOMING_COULD_MATCH to jego dopełnienie opisane tą negacją
+
   }
 }
