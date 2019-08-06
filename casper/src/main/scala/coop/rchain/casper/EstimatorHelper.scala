@@ -44,49 +44,61 @@ object EstimatorHelper {
   ): F[Boolean] =
     dag.deriveOrdering(0L).flatMap { implicit ordering =>
       for {
-        b1MetaDataOpt        <- dag.lookup(b1.blockHash)
-        b2MetaDataOpt        <- dag.lookup(b2.blockHash)
-        blockMetaDataSeq     = Vector(b1MetaDataOpt.get, b2MetaDataOpt.get)
-        uncommonAncestorsMap <- DagOperations.uncommonAncestors[F](blockMetaDataSeq, dag)
+        b1MetaDataOpt <- dag.lookup(b1.blockHash)
+        b2MetaDataOpt <- dag.lookup(b2.blockHash)
+        uncommonAncestorsMap <- DagOperations.uncommonAncestors[F](
+                                 Vector(b1MetaDataOpt.get, b2MetaDataOpt.get),
+                                 dag
+                               )
         (b1AncestorsMap, b2AncestorsMap) = uncommonAncestorsMap.partition {
           case (_, bitSet) => bitSet == BitSet(0)
         }
-        b1AncestorsMeta           = b1AncestorsMap.keys
-        b2AncestorsMeta           = b2AncestorsMap.keys
-        b1EventsRes               <- blockEvents[F](b1AncestorsMeta.toList)
-        (b1Events, allB1Channels) = b1EventsRes
-        b2EventsRes               <- blockEvents[F](b2AncestorsMeta.toList)
-        (b2Events, allB2Channels) = b2EventsRes
-        conflictsBecauseOfJoins = joinedChannels(b1Events)
-          .intersect(allB2Channels)
-          .nonEmpty || joinedChannels(b2Events).intersect(allB1Channels).nonEmpty
-        b1Ops = operationsPerChannel(b1Events)
-        b2Ops = operationsPerChannel(b2Events)
-        conflictingChannels = b1Ops
-          .map {
-            case (k, v) =>
-              (k, channelConflicts(v, b2Ops.get(k).getOrElse(Set.empty)))
-          }
-          .filter { case (_, v) => v }
-          .keys
-        conflicts = conflictsBecauseOfJoins || conflictingChannels.nonEmpty
+        b1Events <- extractBlockEvents[F](b1AncestorsMap.keys.toList)
+        b2Events <- extractBlockEvents[F](b2AncestorsMap.keys.toList)
+        conflictsBecauseOfJoins = extractJoinedChannels(b1Events)
+          .intersect(allChannels(b2Events))
+          .nonEmpty || extractJoinedChannels(b2Events).intersect(allChannels(b1Events)).nonEmpty
+        conflicts = conflictsBecauseOfJoins || containConflictingEvents(b1Events, b2Events)
         _ <- if (conflicts) {
               Log[F].info(
-                s"Block ${PrettyPrinter.buildString(b1.blockHash)} and ${PrettyPrinter
-                  .buildString(b2.blockHash)} conflicts."
+                s"Blocks ${PrettyPrinter.buildString(b1.blockHash)} and ${PrettyPrinter
+                  .buildString(b2.blockHash)} conflict."
               )
             } else {
               Log[F].info(
-                ""
-                /*
-                  s"Block ${PrettyPrinter
-                    .buildString(b1.blockHash)}'s channels ${b1AncestorChannels.map(PrettyPrinter.buildString).mkString(",")} and block ${PrettyPrinter
-                    .buildString(b2.blockHash)}'s channels ${b2AncestorChannels.map(PrettyPrinter.buildString).mkString(",")} don't intersect."
-               */
+                s"Blocks ${PrettyPrinter
+                  .buildString(b1.blockHash)} and ${PrettyPrinter
+                  .buildString(b2.blockHash)} don't conflict."
               )
             }
       } yield conflicts
     }
+
+  private[this] def containConflictingEvents(
+      b1Events: BlockEvents,
+      b2Events: BlockEvents
+  ): Boolean = {
+    def channelConflicts(
+        b1Events: Set[TuplespaceEvent],
+        b2Events: Set[TuplespaceEvent]
+    ): Boolean =
+      (for {
+        b1  <- b1Events
+        b2  <- b2Events
+        res = b1.conflicts(b2)
+        // TODO: fail fast
+      } yield (res)).contains(true)
+
+    val b2Ops = tuplespaceEventsPerChannel(b2Events)
+    tuplespaceEventsPerChannel(b1Events)
+      .map {
+        case (k, v) =>
+          (k, channelConflicts(v, b2Ops.get(k).getOrElse(Set.empty)))
+      }
+      .filter { case (_, v) => v }
+      .keys
+      .nonEmpty
+  }
 
   private[this] def isVolatile(comm: COMM, consumes: Set[Consume], produces: Set[Produce]) =
     !comm.consume.persistent && consumes.contains(comm.consume) && comm.produces.forall(
@@ -95,15 +107,23 @@ object EstimatorHelper {
 
   type BlockEvents = (Set[Produce], Set[Consume], Set[COMM])
 
-  private[this] def blockEvents[F[_]: Monad: BlockStore](
+  private[this] def allChannels(events: BlockEvents) = events match {
+    case (freeProduceEvents, freeConsumeEvents, nonVolatileCommEvents) =>
+      freeProduceEvents.map(_.channelsHash).toSet ++ freeConsumeEvents
+        .flatMap(_.channelsHashes)
+        .toSet ++ nonVolatileCommEvents.flatMap { comm =>
+        comm.consume.channelsHashes ++ comm.produces.map(_.channelsHash)
+      }.toSet
+  }
+
+  private[this] def extractBlockEvents[F[_]: Monad: BlockStore](
       blockAncestorsMeta: List[BlockMetadata]
-  ): F[(BlockEvents, Set[Blake2b256Hash])] =
+  ): F[BlockEvents] =
     for {
       maybeAncestors <- blockAncestorsMeta.traverse(
                          blockAncestorMeta => BlockStore[F].get(blockAncestorMeta.blockHash)
                        )
       ancestors = maybeAncestors.flatten
-      // TODO: convert directly to TuplespaceEvents instead of going via toRspaceEvent
       ancestorEvents = (ancestors.flatMap(_.getBody.deploys.flatMap(_.deployLog)) ++
         ancestors.flatMap(_.getBody.deploys.flatMap(_.paymentLog)))
         .map(EventConverter.toRspaceEvent)
@@ -119,37 +139,18 @@ object EstimatorHelper {
       consumesInCommEvents = allCommEvents.map(_.consume)
       freeProduceEvents    = allProduceEvents.filterNot(producesInCommEvents.contains(_))
       freeConsumeEvents    = allConsumeEvents.filterNot(consumesInCommEvents.contains(_))
-      allChannels = freeProduceEvents.map(_.channelsHash).toSet ++ freeConsumeEvents
-        .flatMap(_.channelsHashes)
-        .toSet ++ nonVolatileCommEvents.flatMap { comm =>
-        comm.consume.channelsHashes ++ comm.produces.map(_.channelsHash)
-      }.toSet
-    } yield ((freeProduceEvents, freeConsumeEvents, nonVolatileCommEvents), allChannels)
+    } yield (freeProduceEvents, freeConsumeEvents, nonVolatileCommEvents)
 
-  private[this] def channelConflicts(
-      b1Events: Set[TuplespaceEvent],
-      b2Events: Set[TuplespaceEvent]
-  ): Boolean =
-    (for {
-      b1  <- b1Events
-      b2  <- b2Events
-      res = b1.conflicts(b2)
-      // TODO: fail fast
-    } yield (res)).contains(true)
-
-  private[this] def joinedChannels(b: BlockEvents): Set[Blake2b256Hash] = b match {
-    case (_, consumes, comms) =>
-      val consumesJoins = consumes.collect {
-        case Consume(channelsHashes, _, _, _) if channelsHashes.size > 1 => channelsHashes
-      }
-      val commsJoins = comms.collect {
-        case COMM(Consume(channelsHashes, _, _, _), _, _) if channelsHashes.size > 1 =>
-          channelsHashes
-      }
-      (consumesJoins ++ commsJoins).flatten
+  private[this] def extractJoinedChannels(b: BlockEvents): Set[Blake2b256Hash] = {
+    def joinedChannels(consumes: Set[Consume]) =
+      consumes.withFilter(Consume.hasJoins).flatMap(_.channelsHashes)
+    b match {
+      case (_, consumes, comms) =>
+        joinedChannels(consumes) ++ joinedChannels(comms.map(_.consume))
+    }
   }
 
-  private[this] def operationsPerChannel(
+  private[this] def tuplespaceEventsPerChannel(
       b: BlockEvents
   ): Map[Blake2b256Hash, Set[TuplespaceEvent]] =
     b match {
