@@ -1260,7 +1260,6 @@ trait InMemoryReplayRSpaceTestsBase[C, P, A, K] extends ReplayRSpaceTestsBase[C,
   ): S = {
     implicit val log: Log[Task]          = Log.log[Task]
     implicit val metricsF: Metrics[Task] = new Metrics.MetricsNOP[Task]()
-    implicit val spanF: Span[Task]       = NoopSpan[Task]()
 
     val branch = Branch("inmem")
 

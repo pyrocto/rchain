@@ -31,19 +31,10 @@ abstract class RSpaceOps[F[_]: Concurrent, C, P, A, K](
     serializeC: Serialize[C],
     serializeP: Serialize[P],
     serializeK: Serialize[K],
-    logF: Log[F],
-    spanF: Span[F]
+    logF: Log[F]
 ) extends SpaceMatcher[F, C, P, A, K] {
 
   protected[this] val eventLog: SyncVar[EventLog] = create[EventLog](Seq.empty)
-
-  private[this] val installSpanLabel         = Metrics.Source(MetricsSource, "install")
-  private[this] val restoreInstallsSpanLabel = Metrics.Source(MetricsSource, "restore-installs")
-  private[this] val createSoftCheckpointSpanLabel =
-    Metrics.Source(MetricsSource, "create-soft-checkpoint")
-  private[this] val revertSoftCheckpointSpanLabel =
-    Metrics.Source(MetricsSource, "revert-soft-checkpoint")
-  private[this] val resetSpanLabel = Metrics.Source(MetricsSource, "reset")
 
   //TODO close in some F state abstraction
   protected val historyRepositoryAtom: AtomicAny[HistoryRepository[F, C, P, A, K]] = AtomicAny(
@@ -116,14 +107,13 @@ abstract class RSpaceOps[F[_]: Concurrent, C, P, A, K](
     installs
   }
 
-  protected[this] def restoreInstalls(): F[Unit] = spanF.trace(restoreInstallsSpanLabel) {
+  protected[this] def restoreInstalls(): F[Unit] =
     installs.get.toList
       .traverse {
         case (channels, Install(patterns, continuation, _match)) =>
           install(channels, patterns, continuation)(_match)
       }
       .as(())
-  }
 
   @SuppressWarnings(Array("org.wartremover.warts.Throw"))
   // TODO stop throwing exceptions
@@ -192,15 +182,14 @@ abstract class RSpaceOps[F[_]: Concurrent, C, P, A, K](
 
   override def install(channels: Seq[C], patterns: Seq[P], continuation: K)(
       implicit m: Match[F, P, A]
-  ): F[Option[(K, Seq[A])]] = spanF.trace(installSpanLabel) {
+  ): F[Option[(K, Seq[A])]] =
     installLockF(channels) {
       lockedInstall(channels, patterns, continuation)
     }
-  }
 
   def toMap: F[Map[Seq[C], Row[P, A, K]]] = storeAtom.get().toMap
 
-  override def reset(root: Blake2b256Hash): F[Unit] = spanF.trace(resetSpanLabel) {
+  override def reset(root: Blake2b256Hash): F[Unit] =
     for {
       nextHistory <- historyRepositoryAtom.get().reset(root)
       _           = historyRepositoryAtom.set(nextHistory)
@@ -209,7 +198,6 @@ abstract class RSpaceOps[F[_]: Concurrent, C, P, A, K](
       _           <- createNewHotStore(nextHistory)(serializeK.toCodec)
       _           <- restoreInstalls()
     } yield ()
-  }
 
   override def clear(): F[Unit] = reset(History.emptyRootHash)
 
@@ -226,24 +214,21 @@ abstract class RSpaceOps[F[_]: Concurrent, C, P, A, K](
     } yield ()
 
   override def createSoftCheckpoint(): F[SoftCheckpoint[C, P, A, K]] =
-    spanF.trace(createSoftCheckpointSpanLabel) {
-      for {
-        cache <- storeAtom.get().snapshot()
-        log   = eventLog.take()
-        _     = eventLog.put(Seq.empty)
-      } yield SoftCheckpoint[C, P, A, K](cache, log)
-    }
+    for {
+      cache <- storeAtom.get().snapshot()
+      log   = eventLog.take()
+      _     = eventLog.put(Seq.empty)
+    } yield SoftCheckpoint[C, P, A, K](cache, log)
 
-  override def revertToSoftCheckpoint(checkpoint: SoftCheckpoint[C, P, A, K]): F[Unit] =
-    spanF.trace(revertSoftCheckpointSpanLabel) {
-      implicit val ck: Codec[K] = serializeK.toCodec
-      for {
-        hotStore <- HotStore.from(checkpoint.cacheSnapshot.cache, historyRepository)
-        _        = storeAtom.set(hotStore)
-        _        = eventLog.take()
-        _        = eventLog.put(checkpoint.log)
-      } yield ()
-    }
+  override def revertToSoftCheckpoint(checkpoint: SoftCheckpoint[C, P, A, K]): F[Unit] = {
+    implicit val ck: Codec[K] = serializeK.toCodec
+    for {
+      hotStore <- HotStore.from(checkpoint.cacheSnapshot.cache, historyRepository)
+      _        = storeAtom.set(hotStore)
+      _        = eventLog.take()
+      _        = eventLog.put(checkpoint.log)
+    } yield ()
+  }
 
   override def close(): F[Unit] = historyRepository.close()
 

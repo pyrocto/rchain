@@ -202,7 +202,6 @@ object AddressBookExample {
 
     implicit val log: Log[Id]          = Log.log
     implicit val metricsF: Metrics[Id] = new Metrics.MetricsNOP[Id]()
-    implicit val spanF: Span[Id]       = NoopSpan[Id]()
 
     // Here we define a temporary place to put the store's files
     val storePath: Path = Files.createTempDirectory("rspace-address-book-example-")
@@ -243,7 +242,6 @@ object AddressBookExample {
 
     implicit val log: Log[Id]          = Log.log
     implicit val metricsF: Metrics[Id] = new Metrics.MetricsNOP[Id]()
-    implicit val spanF: Span[Id]       = NoopSpan[Id]()
 
     // Here we define a temporary place to put the store's files
     val storePath: Path = Files.createTempDirectory("rspace-address-book-example-")
@@ -337,7 +335,6 @@ object AddressBookExample {
 
     implicit val log: Log[Id]          = Log.log
     implicit val metricsF: Metrics[Id] = new Metrics.MetricsNOP[Id]()
-    implicit val spanF: Span[Id]       = NoopSpan[Id]()
 
     // Here we define a temporary place to put the store's files
     val storePath = Files.createTempDirectory("rspace-address-book-example-")
