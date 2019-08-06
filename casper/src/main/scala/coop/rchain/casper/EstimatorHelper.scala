@@ -156,49 +156,19 @@ object EstimatorHelper {
     b match {
       case (produces, consumes, comms) =>
         val produceEvents = produces
-          .groupBy(_.channelsHash)
-          .mapValues[Set[TuplespaceEvent]](
-            ops =>
-              ops.map(
-                p =>
-                  NoMatch(
-                    if (p.persistent) NonLinearProduce(p.hash)
-                    else LinearProduce(p.hash)
-                  )
-              )
-          )
+          .map(TuplespaceEvent.from(_))
+
         val consumeEvents = consumes
-          .collect {
-            case Consume(singleChannelHash :: Nil, hash, persistent, _) =>
-              singleChannelHash -> NoMatch(
-                if (persistent) NonLinearConsume(hash)
-                else LinearConsume(hash)
-              )
-          }
-          .groupBy(_._1)
-          .mapValues[Set[TuplespaceEvent]](_.map(_._2))
+          .flatMap(TuplespaceEvent.from(_))
 
         val commEvents = comms
-          .collect {
-            case COMM(consume, produce :: Nil, _) => {
-              val cop =
-                if (consume.persistent) NonLinearConsume(consume.hash)
-                else LinearConsume(consume.hash)
-              val pop =
-                if (produce.persistent) NonLinearProduce(produce.hash)
-                else LinearProduce(produce.hash)
-              produce.channelsHash -> Match(
-                cop,
-                pop,
-                if (produces.contains(produce)) cop
-                else pop
-              )
-            }
-          }
+          .flatMap(TuplespaceEvent.from(_, produces))
+
+        (produceEvents
+          .combine(consumeEvents)
+          .combine(commEvents))
           .groupBy(_._1)
           .mapValues[Set[TuplespaceEvent]](_.map(_._2))
-
-        produceEvents.combine(consumeEvents).combine(commEvents)
     }
 
   sealed trait TuplespaceOperation extends Product with Serializable {
@@ -218,6 +188,46 @@ object EstimatorHelper {
       incomingEvent: TuplespaceOperation
   ) extends TuplespaceEvent
   final case class NoMatch(op: TuplespaceOperation) extends TuplespaceEvent
+
+  object TuplespaceEvent {
+
+    implicit private[this] def liftProduce(produce: Produce): ProduceOperation =
+      if (produce.persistent) NonLinearProduce(produce.hash)
+      else LinearProduce(produce.hash)
+
+    implicit private[this] def liftConsume(consume: Consume): ConsumeOperation =
+      if (consume.persistent) NonLinearConsume(consume.hash)
+      else LinearConsume(consume.hash)
+
+    def from(produce: Produce): (Blake2b256Hash, TuplespaceEvent) = produce.channelsHash -> NoMatch(
+      produce
+    )
+
+    def from(consume: Consume): Option[(Blake2b256Hash, TuplespaceEvent)] = consume match {
+      case Consume(singleChannelHash :: Nil, _, _, _) =>
+        Some(
+          singleChannelHash -> NoMatch(
+            consume
+          )
+        )
+      case _ => None
+    }
+
+    def from(comm: COMM, produces: Set[Produce]): Option[(Blake2b256Hash, TuplespaceEvent)] =
+      comm match {
+        case COMM(consume, produce :: Nil, _) => {
+          Some(
+            produce.channelsHash -> Match(
+              consume,
+              produce,
+              if (produces.contains(produce)) consume
+              else produce
+            )
+          )
+        }
+        case _ => None
+      }
+  }
 
   // define ordering of events to reduce duplication in the pattern match
   // e.g. no match always comes before a match, produce before consume etc.
