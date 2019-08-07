@@ -250,7 +250,8 @@ class MultiParentCasperMergeSpec extends FlatSpec with Matchers with Inspectors 
   it should "handle multi-parent blocks correctly when they operate on volatile produce/consume pairs" in effectTest {
     val tuples = mergeabilityCases.toList.map {
       case ((name, desc), y) =>
-        y.attempt.map(_.fold(_ => s"$name failed\n", _ => s"$name ${desc.hashCode()} OK\n"))
+        val key = s"$name ${desc.hashCode()}"
+        y.attempt.map(_.fold(_ => s"$key failed\n", _ => s"$key OK\n"))
     }
     val results = tuples.parSequence
     results.map(
