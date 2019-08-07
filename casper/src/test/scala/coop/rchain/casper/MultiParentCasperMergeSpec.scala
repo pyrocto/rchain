@@ -62,7 +62,7 @@ class MultiParentCasperMergeSpec extends FlatSpec with Matchers with Inspectors 
   it should "handle multi-parent blocks correctly when they operate on stdout" in effectTest {
     def echoContract(no: Int) =
       Rho(s"""new stdout(`rho:io:stdout`) in { stdout!("Contract $no") }""")
-    conflictsForNow(echoContract(1), echoContract(2), Rho("Nil"))
+    merges(echoContract(1), echoContract(2), Rho("Nil"))
   }
 
   //same polarity, merges
@@ -147,61 +147,61 @@ class MultiParentCasperMergeSpec extends FlatSpec with Matchers with Inspectors 
   val C1 = Rho("contract @0(@1) = { 0 }")
 
   //FIXME add missing cases for in-deploy COMM-s wherever there's a pair without X (a COMM)
-  //FIXME all `conflictsForNow` should eventually be replaced with `merges`
+  //FIXME all `merges` should eventually be replaced with `merges`
   // TODO: Peek rows/column
   // Note this skips pairs that lead to infinite loops
   val mergeabilityCases = Map(
-    "!X !C" -> SAME_POLARITY_MERGE -> merges(S0, S1, C1),
-    "!X !X" -> SAME_POLARITY_MERGE -> merges(S0, S0, Nil),
-    "!X !4" -> SAME_POLARITY_MERGE -> merges(S0, S1, F1),
-//    "!X (!4)"   -> VOLATILE_EVENT             -> merges(S0, S0 | F_, Nil),
-    "!X !C" -> SAME_POLARITY_MERGE -> merges(S0, S1, C1),
-//    "!X (!C)"   -> PERSISTENT_COULD_MATCH     -> conflicts(S0, S0 | C_, Nil),
-//    "!X 4X"     -> INCOMING_COULD_MATCH       -> conflicts(S0, F_, Nil),
-//    "!X 4!"     -> HAD_ITS_MATCH              -> merges(S0, F_, S0),
-//    "!X (4!)"   -> VOLATILE_EVENT             -> coveredBy("!X (!4)"),
-//    "!X 4!!"    -> HAD_ITS_MATCH              -> conflictsForNow(S0, F_, R0),
-//    "!X (4!!)"  -> PERSISTENT_COULD_NOT_MATCH -> conflictsForNow(S0, F_ | R0, Nil),
-    "!X !!X" -> SAME_POLARITY_MERGE -> merges(S0, R0, Nil),
-    "!X !!4" -> SAME_POLARITY_MERGE -> merges(S0, R1, F1),
-//    "!X (!!4)"  -> PERSISTENT_COULD_NOT_MATCH -> coveredBy("!X (4!!)"),
-//    "!X CX"     -> INCOMING_COULD_MATCH       -> conflicts(S0, C_, Nil),
-//    "!X C!"     -> INCOMING_COULD_MATCH       -> conflicts(S0, C_, S0),
-//    "!X (C!)"   -> PERSISTENT_COULD_MATCH     -> conflicts(S0, C_ | S0, Nil),
-    "!4 !4" -> COULD_MATCH_SAME_TRUE  -> conflicts(S0, S1, F_),
-    "!4 !4" -> COULD_MATCH_SAME_FALSE -> merges(S0, S1, F0 | F1),
-//    "!4 (!4)"   -> VOLATILE_EVENT             -> merges(S0, S1 | F_, F0),
-//    "(!4) (!4)" -> VOLATILE_EVENT             -> merges(S0 | F_, S0 | F_, Nil),
-    "!4 !C" -> COULD_MATCH_SAME_FALSE -> merges(S0, S1, F0 | C1),
-//    "!4 4X"     -> HAD_ITS_MATCH              -> merges(S0, F_, F_),
-//    "!4 4!"     -> HAD_ITS_MATCH              -> conflictsForNow(S0, F_, F0 | S1),
-//    "!4 (4!)"   -> VOLATILE_EVENT             -> merges(S0, S1 | F_, F0),
-//    "!4 4!!"    -> HAD_ITS_MATCH              -> conflictsForNow(S0, F_, F0 | R1),
-    "!4 !!X" -> SAME_POLARITY_MERGE -> merges(S0, R1, F0),
-    "!4 !!4" -> SAME_POLARITY_MERGE -> merges(S0, R1, F_ | F1),
-//    "!4 CX"     -> HAD_ITS_MATCH              -> conflictsForNow(S0, C_, F_),
-//    "!4 C!"     -> HAD_ITS_MATCH              -> conflictsForNow(S0, C_, F0 | S1),
-//    "!4 (C!)"   -> PERSISTENT_COULD_NOT_MATCH -> conflicts(S0, C_ | S0, F0),
-//    "!4 (!C)"   -> PERSISTENT_COULD_NOT_MATCH -> conflicts(S0, S0 | C_, F0),
-    "!C !C" -> COULD_MATCH_SAME_TRUE -> merges(S0, S0, C_),
-//    "!C (!C)"   -> PERSISTENT_COULD_NOT_MATCH -> conflicts(S0, C_ | S1, C0),
-//    "!C 4X"     -> HAD_ITS_MATCH              -> conflictsForNow(S0, F_, C_),
-//    "!C 4!"     -> HAD_ITS_MATCH              -> conflictsForNow(S0, F_, C0 | S1),
-//    "!C (4!)"   -> VOLATILE_EVENT             -> merges(S0, F1 | S1, C0),
-//    "!C 4!!"    -> HAD_ITS_MATCH              -> conflictsForNow(S0, F_, C0 | R1),
-    "!C !!X" -> SAME_POLARITY_MERGE    -> merges(S0, R1, C0),
-    "!C !!4" -> COULD_MATCH_SAME_FALSE -> conflictsForNow(S0, R1, C0 | F1),
-//    "!C CX"     -> HAD_ITS_MATCH              -> conflictsForNow(S0, C_, C_),
-//    "!C C!"     -> HAD_ITS_MATCH              -> conflictsForNow(S0, C_, C0 | S1),
-//    "!C (C!)"   -> PERSISTENT_COULD_NOT_MATCH -> coveredBy("!C (!C)"),
-    "4X 4X" -> SAME_POLARITY_MERGE -> merges(F_, F_, Nil),
-    "4X 4!" -> SAME_POLARITY_MERGE -> merges(F0, F_, S1),
+    "!X !C"     -> SAME_POLARITY_MERGE        -> merges(S0, S1, C1),
+    "!X !X"     -> SAME_POLARITY_MERGE        -> merges(S0, S0, Nil),
+    "!X !4"     -> SAME_POLARITY_MERGE        -> merges(S0, S1, F1),
+    "!X (!4)"   -> VOLATILE_EVENT             -> merges(S0, S0 | F_, Nil),
+    "!X !C"     -> SAME_POLARITY_MERGE        -> merges(S0, S1, C1),
+    "!X (!C)"   -> PERSISTENT_COULD_MATCH     -> conflicts(S0, S0 | C_, Nil),
+    "!X 4X"     -> INCOMING_COULD_MATCH       -> conflicts(S0, F_, Nil),
+    "!X 4!"     -> HAD_ITS_MATCH              -> merges(S0, F_, S0),
+    "!X (4!)"   -> VOLATILE_EVENT             -> coveredBy("!X (!4)"),
+    "!X 4!!"    -> HAD_ITS_MATCH              -> merges(S0, F_, R0),
+    "!X (4!!)"  -> PERSISTENT_COULD_NOT_MATCH -> merges(S0, F_ | R0, Nil),
+    "!X !!X"    -> SAME_POLARITY_MERGE        -> merges(S0, R0, Nil),
+    "!X !!4"    -> SAME_POLARITY_MERGE        -> merges(S0, R1, F1),
+    "!X (!!4)"  -> PERSISTENT_COULD_NOT_MATCH -> coveredBy("!X (4!!)"),
+    "!X CX"     -> INCOMING_COULD_MATCH       -> conflicts(S0, C_, Nil),
+    "!X C!"     -> INCOMING_COULD_MATCH       -> conflicts(S0, C_, S0),
+    "!X (C!)"   -> PERSISTENT_COULD_MATCH     -> conflicts(S0, C_ | S0, Nil),
+    "!4 !4"     -> COULD_MATCH_SAME_TRUE      -> conflicts(S0, S1, F_),
+    "!4 !4"     -> COULD_MATCH_SAME_FALSE     -> merges(S0, S1, F0 | F1),
+    "!4 (!4)"   -> VOLATILE_EVENT             -> merges(S0, S1 | F_, F0),
+    "(!4) (!4)" -> VOLATILE_EVENT             -> merges(S0 | F_, S0 | F_, Nil),
+    "!4 !C"     -> COULD_MATCH_SAME_FALSE     -> merges(S0, S1, F0 | C1),
+    "!4 4X"     -> HAD_ITS_MATCH              -> merges(S0, F_, F_),
+    "!4 4!"     -> HAD_ITS_MATCH              -> merges(S0, F_, F0 | S1),
+    "!4 (4!)"   -> VOLATILE_EVENT             -> merges(S0, S1 | F_, F0),
+    "!4 4!!"    -> HAD_ITS_MATCH              -> merges(S0, F_, F0 | R1),
+    "!4 !!X"    -> SAME_POLARITY_MERGE        -> merges(S0, R1, F0),
+    "!4 !!4"    -> SAME_POLARITY_MERGE        -> merges(S0, R1, F_ | F1),
+    "!4 CX"     -> HAD_ITS_MATCH              -> merges(S0, C_, F_),
+    "!4 C!"     -> HAD_ITS_MATCH              -> merges(S0, C_, F0 | S1),
+    "!4 (C!)"   -> PERSISTENT_COULD_NOT_MATCH -> conflicts(S0, C_ | S0, F0),
+    "!4 (!C)"   -> PERSISTENT_COULD_NOT_MATCH -> conflicts(S0, S0 | C_, F0),
+    "!C !C"     -> COULD_MATCH_SAME_TRUE      -> merges(S0, S0, C_),
+    "!C (!C)"   -> PERSISTENT_COULD_NOT_MATCH -> conflicts(S0, C_ | S1, C0),
+    "!C 4X"     -> HAD_ITS_MATCH              -> merges(S0, F_, C_),
+    "!C 4!"     -> HAD_ITS_MATCH              -> merges(S0, F_, C0 | S1),
+    "!C (4!)"   -> VOLATILE_EVENT             -> merges(S0, F1 | S1, C0),
+    "!C 4!!"    -> HAD_ITS_MATCH              -> merges(S0, F_, C0 | R1),
+    "!C !!X"    -> SAME_POLARITY_MERGE        -> merges(S0, R1, C0),
+    "!C !!4"    -> COULD_MATCH_SAME_FALSE     -> merges(S0, R1, C0 | F1),
+    "!C CX"     -> HAD_ITS_MATCH              -> merges(S0, C_, C_),
+    "!C C!"     -> HAD_ITS_MATCH              -> merges(S0, C_, C0 | S1),
+    "!C (C!)"   -> PERSISTENT_COULD_NOT_MATCH -> coveredBy("!C (!C)"),
+    "4X 4X"     -> SAME_POLARITY_MERGE        -> merges(F_, F_, Nil),
+    "4X 4!"     -> SAME_POLARITY_MERGE        -> merges(F0, F_, S1),
     // Skipping 4X 4!! merges, 4X !!X may merge or not, 4X !!4 may merge or not
-    "4X CX" -> SAME_POLARITY_MERGE -> merges(F_, C_, Nil),
-    "4X C!" -> SAME_POLARITY_MERGE -> merges(F0, C1, S1),
-//    "4X (!!4)" -> PERSISTENT_COULD_MATCH -> conflicts(F_, R0 | F_, Nil),
-    "4! 4!" -> COULD_MATCH_SAME_TRUE  -> conflicts(F_, F_, S0),
-    "4! 4!" -> COULD_MATCH_SAME_FALSE -> merges(F0, F1, S0 | S1),
+    "4X CX"    -> SAME_POLARITY_MERGE    -> merges(F_, C_, Nil),
+    "4X C!"    -> SAME_POLARITY_MERGE    -> merges(F0, C1, S1),
+    "4X (!!4)" -> PERSISTENT_COULD_MATCH -> conflicts(F_, R0 | F_, Nil),
+    "4! 4!"    -> COULD_MATCH_SAME_TRUE  -> conflicts(F_, F_, S0),
+    "4! 4!"    -> COULD_MATCH_SAME_FALSE -> merges(F0, F1, S0 | S1),
     // Skipping 4! 4!! merges, 4! !!X merges, 4! !!4 merges
     "4! CX" -> SAME_POLARITY_MERGE    -> merges(F_, C1, S0),
     "4! C!" -> COULD_MATCH_SAME_TRUE  -> conflicts(F_, C_, S0),
@@ -213,46 +213,49 @@ class MultiParentCasperMergeSpec extends FlatSpec with Matchers with Inspectors 
     "C! C!" -> COULD_MATCH_SAME_FALSE -> merges(C0, C1, S0 | S1),
     // 4!! / !!4 row is similar to !4 / 4! and thus skipped
     // C!! / !!C row is similar to !C / C! and thus skipped
-    "CX !!X" -> INCOMING_COULD_MATCH -> conflicts(R0, C_, Nil),
-//    "(!4) !4"   -> VOLATILE_EVENT             -> coveredBy("!4 (!4)"),
-//    "(!4) (!C)" -> VOLATILE_EVENT             -> coveredBy("(!4) !C"),
-//    "(!4) (4!)" -> VOLATILE_EVENT             -> merges(S0 | F_, S0 | F_, Nil),
-//    "(!4) (C!)" -> PERSISTENT_COULD_NOT_MATCH -> merges(S0 | F_, C_ | S0, Nil),
-//    "(!4) 4X"   -> VOLATILE_EVENT             -> merges(S0 | F_, F_, Nil),
-//    "(!4) CX"   -> VOLATILE_EVENT             -> merges(S0 | F_, C_, Nil),
-    "(!C) !C" -> COULD_MATCH_SAME_TRUE -> conflicts(S0 | C_, S0, C_),
-//    "(!C) (!C)" -> PERSISTENT_COULD_NOT_MATCH -> conflictsForNow(S0 | C_, S0 | C_, Nil),
-//    "(!C) (4!)" -> VOLATILE_EVENT             -> merges(S0 | C_, F_ | S0, Nil),
-//    "(!C) (C!)" -> PERSISTENT_COULD_NOT_MATCH -> conflictsForNow(S0 | C_, C_ | S0, Nil),
-//    "(!C) 4!"   -> PERSISTENT_COULD_MATCH     -> conflicts(S0 | C_, F_, S0),
-//    "(!C) 4X"   -> PERSISTENT_COULD_NOT_MATCH -> conflictsForNow(S0 | C_, F_, Nil),
-//    "(!C) C!"   -> PERSISTENT_COULD_MATCH     -> conflicts(S0 | C_, C_, S0),
-//    "(!C) !C"   -> PERSISTENT_COULD_NOT_MATCH -> coveredBy("!C (!C)"),
-//    "(!C) CX"   -> PERSISTENT_COULD_NOT_MATCH -> conflictsForNow(S0 | C_, C_, Nil),
-//    "(4!) (4!)" -> VOLATILE_EVENT             -> merges(F_ | S0, F_ | S0, Nil),
-//    "(4!) (C!)" -> VOLATILE_EVENT             -> merges(F_ | S0, C_ | S0, Nil),
-//    "(4!) 4!"   -> VOLATILE_EVENT             -> merges(F1 | S1, F_, S0),
-//    "(4!) C!"   -> VOLATILE_EVENT             -> merges(F1 | S1, C_, S0),
-//    "(C!) C!"   -> PERSISTENT_COULD_NOT_MATCH -> conflicts(C_ | S0, C_, S0),
-//    "4! (4!)"   -> VOLATILE_EVENT             -> merges(F_, F1 | S1, S0),
-//    "4! (C!)"   -> PERSISTENT_COULD_NOT_MATCH -> conflicts(F_, C_ | S0, S0),
-//    "4X (4!)"   -> VOLATILE_EVENT             -> merges(F_, F_ | S0, Nil),
-//    "4X (C!)"   -> PERSISTENT_COULD_NOT_MATCH -> conflictsForNow(F_, C_ | S0, Nil),
-//    "C! (C!)"   -> PERSISTENT_COULD_NOT_MATCH -> conflictsForNow(C_, C_ | S0, S0),
-//    "CX (C!)"   -> PERSISTENT_COULD_NOT_MATCH -> conflictsForNow(C_, C_ | S0, Nil),
-//    "(!4) 4!"   -> VOLATILE_EVENT             -> merges(S1 | F1, F_, S0),
-//    "(!4) !C"   -> VOLATILE_EVENT             -> merges(S1 | F1, S0, C0),
-//    "(!4) C!"   -> VOLATILE_EVENT             -> merges(S0 | F0, C_, S1),
+    "CX !!X"    -> INCOMING_COULD_MATCH       -> conflicts(R0, C_, Nil),
+    "(!4) !4"   -> VOLATILE_EVENT             -> coveredBy("!4 (!4)"),
+    "(!4) (!C)" -> VOLATILE_EVENT             -> coveredBy("(!4) !C"),
+    "(!4) (4!)" -> VOLATILE_EVENT             -> merges(S0 | F_, S0 | F_, Nil),
+    "(!4) (C!)" -> PERSISTENT_COULD_NOT_MATCH -> merges(S0 | F_, C_ | S0, Nil),
+    "(!4) 4X"   -> VOLATILE_EVENT             -> merges(S0 | F_, F_, Nil),
+    "(!4) CX"   -> VOLATILE_EVENT             -> merges(S0 | F_, C_, Nil),
+    "(!C) !C"   -> COULD_MATCH_SAME_TRUE      -> conflicts(S0 | C_, S0, C_),
+    "(!C) (!C)" -> PERSISTENT_COULD_NOT_MATCH -> merges(S0 | C_, S0 | C_, Nil),
+    "(!C) (4!)" -> VOLATILE_EVENT             -> merges(S0 | C_, F_ | S0, Nil),
+    "(!C) (C!)" -> PERSISTENT_COULD_NOT_MATCH -> merges(S0 | C_, C_ | S0, Nil),
+    "(!C) 4!"   -> PERSISTENT_COULD_MATCH     -> conflicts(S0 | C_, F_, S0),
+    "(!C) 4X"   -> PERSISTENT_COULD_NOT_MATCH -> merges(S0 | C_, F_, Nil),
+    "(!C) C!"   -> PERSISTENT_COULD_MATCH     -> conflicts(S0 | C_, C_, S0),
+    "(!C) !C"   -> PERSISTENT_COULD_NOT_MATCH -> coveredBy("!C (!C)"),
+    "(!C) CX"   -> PERSISTENT_COULD_NOT_MATCH -> merges(S0 | C_, C_, Nil),
+    "(4!) (4!)" -> VOLATILE_EVENT             -> merges(F_ | S0, F_ | S0, Nil),
+    "(4!) (C!)" -> VOLATILE_EVENT             -> merges(F_ | S0, C_ | S0, Nil),
+    "(4!) 4!"   -> VOLATILE_EVENT             -> merges(F1 | S1, F_, S0),
+    "(4!) C!"   -> VOLATILE_EVENT             -> merges(F1 | S1, C_, S0),
+    "(C!) C!"   -> PERSISTENT_COULD_NOT_MATCH -> conflicts(C_ | S0, C_, S0),
+    "4! (4!)"   -> VOLATILE_EVENT             -> merges(F_, F1 | S1, S0),
+    "4! (C!)"   -> PERSISTENT_COULD_NOT_MATCH -> conflicts(F_, C_ | S0, S0),
+    "4X (4!)"   -> VOLATILE_EVENT             -> merges(F_, F_ | S0, Nil),
+    "4X (C!)"   -> PERSISTENT_COULD_NOT_MATCH -> merges(F_, C_ | S0, Nil),
+    "C! (C!)"   -> PERSISTENT_COULD_NOT_MATCH -> merges(C_, C_ | S0, S0),
+    "CX (C!)"   -> PERSISTENT_COULD_NOT_MATCH -> merges(C_, C_ | S0, Nil),
+    "(!4) 4!"   -> VOLATILE_EVENT             -> merges(S1 | F1, F_, S0),
+    "(!4) !C"   -> VOLATILE_EVENT             -> merges(S1 | F1, S0, C0),
+    "(!4) C!"   -> VOLATILE_EVENT             -> merges(S0 | F0, C_, S1),
     "(4!) CX"   -> VOLATILE_EVENT             -> merges(F_ | S0, C_, Nil),
-    "(C!) (C!)" -> PERSISTENT_COULD_NOT_MATCH -> conflictsForNow(C_ | S0, C_ | S0, Nil)
+    "(C!) (C!)" -> PERSISTENT_COULD_NOT_MATCH -> merges(C_ | S0, C_ | S0, Nil)
   )
 
   it should "handle multi-parent blocks correctly when they operate on volatile produce/consume pairs" in effectTest {
     val tuples = mergeabilityCases.toList.map {
-      case ((name, _), y) => y.attempt.map(_.fold(_ => s"$name failed\n", _ => s"$name OK\n"))
+      case ((name, desc), y) =>
+        y.attempt.map(_.fold(_ => s"$name failed\n", _ => s"$name ${desc.hashCode()} OK\n"))
     }
     val results = tuples.parSequence
-    results.map(r => assert(r == mergeabilityCases.keys.map(x => s"${x._1} OK\n")))
+    results.map(
+      r => assert(r == mergeabilityCases.keys.map(x => s"${x._1} ${x._2.hashCode()} OK\n"))
+    )
   }
 
   case class Rho(value: String) {
@@ -260,10 +263,10 @@ class MultiParentCasperMergeSpec extends FlatSpec with Matchers with Inspectors 
   }
   object Nil extends Rho("Nil")
 
-  def conflictsForNow(b1: Rho, b2: Rho, base: Rho)(
-      implicit file: sourcecode.File,
-      line: sourcecode.Line
-  ) = conflicts(b1, b2, base)
+//  def conflictsForNow(b1: Rho, b2: Rho, base: Rho)(
+//      implicit file: sourcecode.File,
+//      line: sourcecode.Line
+//  ) = conflicts(b1, b2, base)
 
   private def conflicts(b1: Rho, b2: Rho, base: Rho)(
       implicit file: sourcecode.File,
@@ -287,7 +290,7 @@ class MultiParentCasperMergeSpec extends FlatSpec with Matchers with Inspectors 
     diamondConflictCheck(base, shuffledBlocks(0), shuffledBlocks(1), numberOfParentsForDiamondTip)
   }
 
-//  private def coveredBy(equivalent: String) = ().pure[Effect]
+  private def coveredBy(equivalent: String) = ().pure[Effect]
 
   private def diamondConflictCheck(
       base: Rho,
