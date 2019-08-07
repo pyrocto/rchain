@@ -218,7 +218,7 @@ object EstimatorHelper {
       comm match {
         case COMM(consume, produce :: Nil, _) => {
           val incoming: TuplespaceOperation =
-            if (produces.contains(produce)) consume else produce
+            if (produces.contains(produce)) produce else consume
           Some(
             produce.channelsHash -> TuplespaceEvent(
               incoming,
